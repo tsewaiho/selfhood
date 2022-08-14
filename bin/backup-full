@@ -1,0 +1,67 @@
+#!/bin/bash
+
+set -eu -o pipefail
+
+# tag could either be 'cron' or 'manual'.
+tag=${1:-manual}
+
+# `pgrep -a backup-full` can check whether it is running
+# Use pgrep without -f will match script name only, and with -f will match the whole command
+me=$(basename $0)
+if [ `pgrep -c $me` -gt 1 ]; then
+	echo "There is another $me process running currently. So this backup will be skipped. $(date -R)"
+	exit 1
+fi
+
+on_INT () {
+	set +e
+	cleanup
+	echo "$me is interrupted."
+	exit 1
+}
+
+cleanup () {
+	for mountpoint in $(zfs list -H -o mountpoint); do
+		umount /mnt/snapshot/$tag$mountpoint
+	done
+	rm -rf /mnt/snapshot/$tag
+	zfs destroy -r tank@$tag
+}
+
+trap on_INT SIGINT
+
+echo "Backup started at $(date -R)"
+
+export RESTIC_REPOSITORY_FILE=$HOME/.config/restic/restic-repository
+export RESTIC_PASSWORD_FILE=$HOME/.config/restic/restic-password
+
+zfs snapshot -r tank@$tag
+
+# /mnt is for temporarily mounted filesystems according to Filesystem Hierarchy Standard.
+for name in $(zfs list -H -o name); do
+	mountpoint=$(zfs get -H -o value mountpoint $name)
+	mkdir -p /mnt/snapshot/$tag$mountpoint
+	mount -t zfs $name@$tag /mnt/snapshot/$tag$mountpoint
+done
+
+cd /mnt/snapshot/$tag
+until restic backup --tag "$tag,full" ./
+do
+	# restic will echo what's wrong
+	echo 'restic backup failed. Retry in 30 seconds...'
+	sleep 30
+done
+
+cleanup
+
+# The --keep-within prune is count from the latest snapshots.
+# So, only take new snapshot on a long time no-snapshoted repo can deal damage.
+# The --keep prune do not affected by the time of the latest snapshots.
+#restic forget --tag 'cron' --prune --keep-within-hourly 24h --keep-within-daily 7d --keep-within-weekly 1m --keep-within-monthly 1y --keep-within-yearly 75y
+until restic forget --tag 'cron,full' --prune --keep-hourly 24 --keep-daily 90 --keep-monthly 120 --keep-yearly 100
+do
+	echo 'restic forget failed. Retry in 30 seconds...'
+	sleep 30
+done
+
+echo -e "Backup finished at $(date -R)\n\n"

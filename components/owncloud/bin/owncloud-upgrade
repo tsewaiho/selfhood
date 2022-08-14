@@ -1,0 +1,103 @@
+#!/bin/bash
+
+set -eu -o pipefail
+
+# You need to check the upgrade path on the manual.
+# https://doc.owncloud.com/server/10.9/admin_manual/maintenance/upgrading/upgrade.html
+# If you are on ownCloud 8.2.11, 9.0.9, 9.1.X, or 10.X.Y you can go directly to 10.9.1.
+
+# Download the Latest SHA256 hash of the ownCloud server package
+wget -nv https://download.owncloud.com/server/stable/owncloud-latest.tar.bz2.sha256 -O /var/tmp/NEW_owncloud-latest.tar.bz2.sha256
+
+# If one of the file to compare do not exist, it is still return non-zero, the update will still be performed.
+{
+	diff -sq /var/tmp/NEW_owncloud-latest.tar.bz2.sha256 /var/tmp/owncloud-latest.tar.bz2.sha256 &&
+	echo "Skip downloading the ownCloud server package"
+} || {
+	echo "Downloading ownCloud server package" &&
+	wget https://download.owncloud.com/server/stable/owncloud-latest.tar.bz2 -O /var/tmp/owncloud-latest.tar.bz2
+}
+
+# `set -e` does work in sub shell
+(cd /var/tmp ; sha256sum -c NEW_owncloud-latest.tar.bz2.sha256)
+
+echo "ownCloud upgrade started at $(date -R)"
+
+# Enable maintenance mode and disable Cron jobs.
+# Currently two background jobs is included in the Cron jobs.
+#   owncloud/core/Command/System/Cron.php
+#   owncloud/apps/dav/lib/Command/CleanupChunks.php
+sudo -u www-data php /var/www/owncloud/occ maintenance:mode --on
+sed -i '/^\s*[^#]/s/^/#/' /etc/cron.d/owncloud
+while pgrep -fx 'php /var/www/owncloud/occ system:cron' >/dev/null ||
+	pgrep -fx 'php /var/www/owncloud/occ dav:cleanup-chunks' >/dev/null
+do
+	echo 'Waiting for the running ownCloud background jobs finish, retry in 10 seconds...'
+	sleep 10
+done
+
+# Prevent Browser Access
+a2dissite owncloud.conf
+systemctl reload apache2
+
+# Disable third party apps
+# The upgrade procedure will try to update the existing compatible apps from market.
+# The command "app:disable" will return 0 even if the app is not installed or enabled.
+#
+# You can check whether the app is compatible at the ownCloud marketplace website.
+# For example, https://marketplace.owncloud.com/apps/richdocuments. <CTRL+F> "Compatible with ownCloud version".
+sudo -u www-data php /var/www/owncloud/occ app:disable richdocuments
+
+rm -rf /var/www/owncloud_bak
+mv /var/www/owncloud /var/www/owncloud_bak
+tar xf /var/tmp/owncloud-latest.tar.bz2 -C /var/www
+
+# Re-add CA Cert
+cp /etc/ssl/certs/ca-certificates.crt /var/www/owncloud/resources/config/ca-bundle.crt
+
+chown -R root:www-data /var/www/owncloud
+chmod -R u=rwX,g=rX,o= /var/www/owncloud
+rm -rf /var/www/owncloud/config
+ln -s /var/lib/owncloud/data /var/www/owncloud/data
+ln -s /var/lib/owncloud/config /var/www/owncloud/config
+ln -s /var/lib/owncloud/apps-external /var/www/owncloud/apps-external
+
+# Need to enable write permission to "data/.htaccess" for www-data for upgrade, because this file may
+#   updated on new version also. Without this line will cause "Permission denied" error on the log file.
+chown www-data:www-data /var/www/owncloud/data/.htaccess
+
+status=$(sudo -u www-data php /var/www/owncloud/occ status)
+{
+	[[ ! $status =~ 'ownCloud or one of the apps require upgrade' ]] &&
+	echo 'ownCloud is already latest version. No upgrade will be performed.'
+} || sudo -u www-data php /var/www/owncloud/occ upgrade
+
+# Re-update .htaccess after upgrade
+chown www-data:www-data /var/www/owncloud/.htaccess
+sudo -u www-data php /var/www/owncloud/occ maintenance:update:htaccess
+
+# Harden the .htaccess permission after install or upgrade
+# .user.ini is already secured
+chown root:www-data /var/www/owncloud/.htaccess /var/www/owncloud/data/.htaccess
+chmod 640 /var/www/owncloud/.htaccess /var/www/owncloud/data/.htaccess
+
+# Re-enable third-party apps that are compatible with the new release
+sudo -u www-data php /var/www/owncloud/occ app:enable richdocuments
+
+sudo -u www-data php /var/www/owncloud/occ maintenance:mode --off
+sed -i 's/^\s*#//' /etc/cron.d/owncloud
+a2ensite owncloud.conf
+systemctl reload apache2
+
+mv /var/tmp/NEW_owncloud-latest.tar.bz2.sha256 /var/tmp/owncloud-latest.tar.bz2.sha256
+
+echo "ownCloud upgrade finished at $(date -R)"
+
+# Test Case
+#
+# 1. Normal update from old to latest version.
+#    Expected: Download the latest package, and update to latest version.
+# 2. Server is the latest version, but the data is old version.
+#    Expected: Skip, download, and update to latest version.
+# 3. Already the latest version.
+#    Expected: Skip download and update, and restart everything.

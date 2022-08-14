@@ -1,0 +1,4 @@
+#!/bin/bash
+
+seconds=$1
+python3 -c "import random; import time; time.sleep(random.random() * $seconds)"

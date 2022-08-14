@@ -1,0 +1,27 @@
+#!/bin/bash
+
+set -eu -o pipefail
+
+source /root/.config/cloudflare/cloudflare.sh
+source /usr/local/lib/cloudflare.sh
+
+# Having newline after close curly brace can omit semicolon.
+# https://www.gnu.org/software/bash/manual/html_node/Command-Grouping.html
+shopt -s expand_aliases
+alias myip='curl --fail --retry 5 --no-progress-meter'
+
+HOSTNAME=$(hostname)
+DOMAIN=$(hostname --domain)
+
+{
+	dns_record=$(dig @1.1.1.1 "$HOSTNAME.$DOMAIN" +short) ||
+	dns_record=$(dig @9.9.9.9 "$HOSTNAME.$DOMAIN" +short)
+} && {
+	my_ip=$(myip https://icanhazip.com/) ||
+	my_ip=$(myip https://checkip.amazonaws.com/)
+} && {
+	[ "$dns_record" = "$my_ip" ] ||
+	cloudflare_dns_update $HOSTNAME $DOMAIN $my_ip
+} || {
+	echo 'vpn-update-self-dns-record failed.' && exit 1
+}
