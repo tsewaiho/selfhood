@@ -27,7 +27,7 @@ echo "ownCloud upgrade started at $(date -R)"
 # Currently two background jobs is included in the Cron jobs.
 #   owncloud/core/Command/System/Cron.php
 #   owncloud/apps/dav/lib/Command/CleanupChunks.php
-sudo -u www-data php /var/www/owncloud/occ maintenance:mode --on
+sudo -u owncloud php /var/www/owncloud/occ maintenance:mode --on
 sed -i '/^\s*[^#]/s/^/#/' /etc/cron.d/owncloud
 while pgrep -fx 'php /var/www/owncloud/occ system:cron' >/dev/null ||
 	pgrep -fx 'php /var/www/owncloud/occ dav:cleanup-chunks' >/dev/null
@@ -46,7 +46,7 @@ systemctl reload apache2
 #
 # You can check whether the app is compatible at the ownCloud marketplace website.
 # For example, https://marketplace.owncloud.com/apps/richdocuments. <CTRL+F> "Compatible with ownCloud version".
-sudo -u www-data php /var/www/owncloud/occ app:disable richdocuments
+sudo -u owncloud php /var/www/owncloud/occ app:disable richdocuments
 
 rm -rf /var/www/owncloud_bak
 mv /var/www/owncloud /var/www/owncloud_bak
@@ -55,36 +55,36 @@ tar xf /var/tmp/owncloud-latest.tar.bz2 -C /var/www
 # Re-add CA Cert
 cp /etc/ssl/certs/ca-certificates.crt /var/www/owncloud/resources/config/ca-bundle.crt
 
-chown -R root:www-data /var/www/owncloud
+chown -R root:owncloud /var/www/owncloud
 chmod -R u=rwX,g=rX,o= /var/www/owncloud
 rm -rf /var/www/owncloud/config
 ln -s /var/lib/owncloud/data /var/www/owncloud/data
 ln -s /var/lib/owncloud/config /var/www/owncloud/config
 ln -s /var/lib/owncloud/apps-external /var/www/owncloud/apps-external
 
-# Need to enable write permission to "data/.htaccess" for www-data for upgrade, because this file may
+# Need to enable write permission to "data/.htaccess" for owncloud for upgrade, because this file may
 #   updated on new version also. Without this line will cause "Permission denied" error on the log file.
-chown www-data:www-data /var/www/owncloud/data/.htaccess
+chown owncloud:owncloud /var/www/owncloud/data/.htaccess
 
-status=$(sudo -u www-data php /var/www/owncloud/occ status)
+status=$(sudo -u owncloud php /var/www/owncloud/occ status)
 {
 	[[ ! $status =~ 'ownCloud or one of the apps require upgrade' ]] &&
 	echo 'ownCloud is already latest version. No upgrade will be performed.'
-} || sudo -u www-data php /var/www/owncloud/occ upgrade
+} || sudo -u owncloud php /var/www/owncloud/occ upgrade
 
 # Re-update .htaccess after upgrade
-chown www-data:www-data /var/www/owncloud/.htaccess
-sudo -u www-data php /var/www/owncloud/occ maintenance:update:htaccess
+chown owncloud:owncloud /var/www/owncloud/.htaccess
+sudo -u owncloud php /var/www/owncloud/occ maintenance:update:htaccess
 
 # Harden the .htaccess permission after install or upgrade
 # .user.ini is already secured
-chown root:www-data /var/www/owncloud/.htaccess /var/www/owncloud/data/.htaccess
+chown root:owncloud /var/www/owncloud/.htaccess /var/www/owncloud/data/.htaccess
 chmod 640 /var/www/owncloud/.htaccess /var/www/owncloud/data/.htaccess
 
 # Re-enable third-party apps that are compatible with the new release
-sudo -u www-data php /var/www/owncloud/occ app:enable richdocuments
+sudo -u owncloud php /var/www/owncloud/occ app:enable richdocuments
 
-sudo -u www-data php /var/www/owncloud/occ maintenance:mode --off
+sudo -u owncloud php /var/www/owncloud/occ maintenance:mode --off
 sed -i 's/^\s*#//' /etc/cron.d/owncloud
 a2ensite owncloud.conf
 systemctl reload apache2

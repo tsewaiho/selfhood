@@ -17,7 +17,9 @@ dnscrypt_proxy_install () {
 	echo -e "[blocked_names]\n  blocked_names_file = 'oisd_dblw_full.txt'" >>/etc/dnscrypt-proxy/dnscrypt-proxy.toml
 
 	touch /etc/dnscrypt-proxy/cloaking-rules.txt
-	wget https://dblw.oisd.nl/ -O /etc/dnscrypt-proxy/oisd_dblw_full.txt
+	touch /etc/dnscrypt-proxy/oisd_dblw_full.txt
+	# This website may down but have no mirror. But this is not a essential component.
+	wget https://dblw.oisd.nl/ -O /etc/dnscrypt-proxy/oisd_dblw_full.txt || true
 
 	(cd /etc/dnscrypt-proxy && dnscrypt-proxy -service install)
 

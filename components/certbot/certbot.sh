@@ -20,11 +20,14 @@ certbot_install () {
 	chmod 400 $HOME/.config/certbot/cloudflare.ini
 }
 
+
 certbot_get_cert () {
-	local name=$1 domain=$2 email=$3
-	until certbot certonly --test-cert \
-		--dns-cloudflare --dns-cloudflare-credentials $HOME/.config/certbot/cloudflare.ini \
-		--key-type ecdsa --elliptic-curve secp384r1 --must-staple \
+	local name=$1 domain=$2 email=$3 must_staple=${4:-true}
+	
+	# Get more than one cert in 60 seconds period usually fail
+	until certbot certonly --test-cert --dns-cloudflare \
+		--dns-cloudflare-propagation-seconds 60 --dns-cloudflare-credentials $HOME/.config/certbot/cloudflare.ini \
+		--key-type ecdsa --elliptic-curve secp384r1 $($must_staple && echo '--must-staple') \
 		--cert-name "$name" -d "$domain" -m "$email" \
 		--agree-tos --no-eff-email
 	do

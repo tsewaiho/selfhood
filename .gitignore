@@ -1,0 +1,5 @@
+*.bz2
+env.sh
+testing/
+test.sh
+credentials/**/*.conf

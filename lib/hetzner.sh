@@ -1,7 +1,7 @@
 # Hetzner
 #
 # Environment variables
-#  - HCLOUD_API_TOKEN
+#  - HETZNER_API_TOKEN
 #
 # Hetnzer have 4 locations
 # The germany location has the best average ping. The Finland has the slowest Internet speed according to speedtest.net
@@ -15,19 +15,20 @@
 
 
 HCLOUD_API_BASE='https://api.hetzner.cloud/v1'
-HCLOUD_AUTH="Authorization: Bearer $HCLOUD_API_TOKEN"
+HCLOUD_AUTH="Authorization: Bearer $HETZNER_API_TOKEN"
 JSON='Content-Type: application/json'
 
 shopt -s expand_aliases
-alias hcloud="curl --fail --retry 30 --retry-delay 10 --no-progress-meter -H '$HCLOUD_AUTH'"
+alias hcloud="curl --fail --retry 30 --retry-delay 10 --retry-all-errors --no-progress-meter -H '$HCLOUD_AUTH'"
 
 server_setup () {
-	local name=$1 domain=$2 user_data=$3 server_id
+	local name=$1 domain=$2 user_data=$3 server_id ip_address_id=''
 	local -n ip_address_ref=$4
 
 	hetzner_delete_ssh_key &&
 	hetzner_create_ssh_key &&
 	hetzner_delete_server &&
+	hetzner_get_ip_address_id &&
 	hetzner_create_server &&
 	hetzner_change_dns_ptr &&
 	echo "Gateway's admin password is null. This VPS provider do not set the root password."
@@ -59,9 +60,22 @@ hetzner_delete_server () {
 	}
 }
 
+hetzner_get_ip_address_id () {
+	[[ -z $HETZNER_SERVER_IP_ADDRESS ]] || 
+	ip_address_id=$(hcloud -G -d "ip=$HETZNER_SERVER_IP_ADDRESS" "$HCLOUD_API_BASE/primary_ips" | jq -e -r '.primary_ips[0].id')
+}
+
 hetzner_create_server () {
-	local data server
-	data=$(jq -n --arg name "$name" --arg ssh_key "$name" --arg user_data "$user_data" '{"image":"debian-11","location":"fsn1","name":$name,"server_type":"cpx11","ssh_keys":[$ssh_key],"user_data":$user_data}') &&
+	local data server 
+
+	data=$(jq -n \
+		--arg name "$name" \
+		--arg ssh_key "$name" \
+		--arg user_data "$user_data" \
+		--arg location "$HETZNER_SERVER_LOCATION" \
+		'{"image":"debian-11","location":$location,"name":$name,"server_type":"cpx11","ssh_keys":[$ssh_key],"user_data":$user_data}'
+	) &&
+	{ [[ -z $ip_address_id ]] || data=$(jq --arg ipv4 "$ip_address_id" '. + {"public_net": {"ipv4":$ipv4}}' <<<$data); } &&
 	server=$(hcloud -H "$JSON" -d "$data" "$HCLOUD_API_BASE/servers") &&
 	ip_address_ref=$(jq -er '.server.public_net.ipv4.ip' <<<$server) &&
 	server_id=$(jq -er '.server.id' <<<$server) || {

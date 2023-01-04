@@ -6,7 +6,8 @@ deb http://deb.debian.org/debian bullseye-updates main
 deb http://deb.debian.org/debian bullseye-backports main contrib
 EOF
 apt-get update
-apt-get -y full-upgrade
+# apt-get -y full-upgrade
+apt-get -y upgrade
 apt-get -y autoremove
 
 apt-get install -y linux-headers-cloud-amd64
@@ -85,26 +86,33 @@ table ip filter {
 		type filter hook input priority filter; policy drop;
 		ct state established,related accept
 		iif lo accept
+		icmp type echo-request limit rate 5/second accept
 		udp dport {51820} accept
-		tcp dport {22,80,443} accept
+		tcp dport {22,25,80,443,587,465,143,993} accept
 		# udp dport {53} ip saddr 10.0.0.0/24 accept
 		ip saddr $home_server_wg_ip_address/32 accept
 	}
 	chain FORWARD {
 		type filter hook forward priority filter; policy drop;
 		ct state established,related accept
-		# ip saddr 10.0.0.0/24 accept
+
+		# Allow the raspi to send email to other
+		ip saddr $home_server_wg_ip_address/32 accept
+
+		# Allow public to send email to vps, the dst NATed packet to forward to raspi
 		ip daddr $home_server_wg_ip_address/32 accept
 	}
 }
 table ip nat {
 	chain PREROUTING {
 		type nat hook prerouting priority dstnat;
-		fib daddr type local tcp dport {80,443} dnat to $home_server_wg_ip_address
+		fib daddr type local tcp dport {25,80,443,587,465,143,993} dnat to $home_server_wg_ip_address
 	}
 	chain POSTROUTING {
 		type nat hook postrouting priority srcnat;
 		# ip saddr 10.0.0.0/24 oif eth0 masquerade
+		
+		ip saddr $home_server_wg_ip_address/32 oif eth0 masquerade
 	}
 }
 EOF

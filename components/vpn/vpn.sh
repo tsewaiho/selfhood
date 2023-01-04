@@ -18,7 +18,7 @@
 # Required node services
 #  - DNS server
 
-declare server_ip_address_for_user_device
+declare server_ip_address_for_user_device vpn_crons
 
 vpn_install () {
 	# Software
@@ -72,7 +72,7 @@ vpn_install () {
 	# The PostUp ping may sometimes fail, so make it optionally by `|| true`
 	for i in "${!wg_config_files[@]}"
 	do
-		local conf
+		local -a conf if_name lookup_table
 		conf=($(cat <<-EOF | python3
 			import configparser
 			config = configparser.ConfigParser()
@@ -83,16 +83,18 @@ vpn_install () {
 			print(config.get('Peer', 'Endpoint'))
 			EOF
 		))
+		if_name=$(awk -F. '{print $1}' <<<${wg_config_files[$i]})
+		lookup_table=$(($GATEWAY_TABLE_START_FROM+$i))
 
 		tee /etc/wireguard/${wg_config_files[$i]} <<-EOF >/dev/null
 		[Interface]
 		PrivateKey = ${conf[0]}
 		Address = ${placeholder_ips[$i]}/32
-		Table = $(($GATEWAY_TABLE_START_FROM+$i))
+		Table = $lookup_table
 		Preup = iptables -t nat -A POSTROUTING -o %i -j SNAT --to $(awk -F/ '{print $1}' <<<${conf[1]})
 		PostDown = iptables -t nat -D POSTROUTING -o %i -j SNAT --to $(awk -F/ '{print $1}' <<<${conf[1]})
-		PreUp = ip rule add from ${user_device_subnet_per_tunnel[$i]} lookup $(($GATEWAY_TABLE_START_FROM+$i)) priority $(($USER_DEVICE_TABLE_PRIORITY+1+$i))
-		PostDown = ip rule del from ${user_device_subnet_per_tunnel[$i]} lookup $(($GATEWAY_TABLE_START_FROM+$i)) priority $(($USER_DEVICE_TABLE_PRIORITY+1+$i))
+		PreUp = ip rule add from ${user_device_subnet_per_tunnel[$i]} lookup $lookup_table priority $GATEWAY_PRIORITY
+		PostDown = ip rule del from ${user_device_subnet_per_tunnel[$i]} lookup $lookup_table priority $GATEWAY_PRIORITY
 		PostUp = iptables -A FORWARD -s ${user_device_subnet_per_tunnel[$i]} -j ACCEPT
 		PreDown = iptables -D FORWARD -s ${user_device_subnet_per_tunnel[$i]} -j ACCEPT
 		PostUp = ping -q -c 1 -I %i $(awk -F: '{print $1}' <<<${conf[3]}) || true
@@ -103,16 +105,20 @@ vpn_install () {
 		Endpoint = ${conf[3]}
 		EOF
 		systemctl enable --now wg-quick@$(awk -F. '{print $1}' <<<${wg_config_files[$i]})
+
+		vpn_crons+="* * * * * root vpn-fault-detect '$if_name' '$vps_ip_address' '$DOCKER_SUBNET_WITH_VPN' '$lookup_table' '$(($GATEWAY_PRIORITY+1+$i))'"$'\n'
 	done
 
 	## Generate WireGuard key pairs for the server and user devices
 	local server_privatekey server_publickey
 	local -a user_device_privatekeys user_device_publickeys
-	server_privatekey=$(echo -n "$HOSTNAME.$DOMAIN" | argon2 "$MASTER_PASSWORD" -r | xxd -r -p | base64 -w 0)
+	# server_privatekey=$(echo -n "$HOSTNAME.$DOMAIN" | argon2 "$MASTER_PASSWORD" -r | xxd -r -p | base64 -w 0)
+	server_privatekey=$(base64_hash "$HOSTNAME.$DOMAIN")
 	server_publickey=$(wg pubkey <<<$server_privatekey)
 	for i in "${!USER_DEVICES[@]}"
 	do
-		user_device_privatekeys[$i]=$(echo -n "${USER_DEVICES[$i]}" | argon2 "$MASTER_PASSWORD" -r | xxd -r -p | base64 -w 0)
+		# user_device_privatekeys[$i]=$(echo -n "${USER_DEVICES[$i]}" | argon2 "$MASTER_PASSWORD" -r | xxd -r -p | base64 -w 0)
+		user_device_privatekeys[$i]=$(base64_hash "${USER_DEVICES[$i]}")
 		user_device_publickeys[$i]=$(wg pubkey <<<${user_device_privatekeys[$i]})
 	done
 
@@ -182,18 +188,29 @@ vpn_install () {
 	# Needs to configure the priority of the user_device table higher than the gateway tunnel table
 	#   because by default the signaficant route 10.1.0.1/24 is lay on the main table, causing the  
 	#   user device cannot connect to each other.
-	tee /etc/wireguard/user_device.conf <<-EOF >/dev/null
+	tee /etc/wireguard/user_device.conf.all <<-EOF >/dev/null
 	[Interface]
 	Address = $server_ip_address_for_user_device/$user_device_subnet_prefix
 	ListenPort = $INTERFACE_USER_DEVICE_LISTEN
 	PrivateKey = $server_privatekey
 	Table = off
-	PreUp = ip rule add from all lookup $USER_DEVICE_TABLE priority $USER_DEVICE_TABLE_PRIORITY
-	PostUp = ip route add $USER_DEVICE_SUBNET dev %i table $USER_DEVICE_TABLE
-	PostDown = ip rule del from all lookup $USER_DEVICE_TABLE priority $USER_DEVICE_TABLE_PRIORITY
+	PostUp = ip route add $USER_DEVICE_SUBNET dev %i table $KNOWN_DEVICES_TABLE
 
 	$Peers
 	EOF
+	
+	tee /etc/wireguard/user_device.conf.admin <<-EOF >/dev/null
+	[Interface]
+	Address = $server_ip_address_for_user_device/$user_device_subnet_prefix
+	ListenPort = $INTERFACE_USER_DEVICE_LISTEN
+	PrivateKey = $server_privatekey
+	Table = off
+	PostUp = ip route add $USER_DEVICE_SUBNET dev %i table $KNOWN_DEVICES_TABLE
+
+	$(sed '/^$/q' <<< $Peers)
+
+	EOF
+	cp /etc/wireguard/user_device.conf.admin /etc/wireguard/user_device.conf
 	systemctl enable --now wg-quick@user_device
 
 	echo 'net.ipv4.ip_forward=1' >>/etc/sysctl.d/local.conf
@@ -206,6 +223,10 @@ vpn_install () {
 vpn_cron () {
 	tee /etc/cron.d/vpn <<-EOF >/dev/null
 	PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+	MAILTO=''
+
 	* * * * * root random-sleep 30 && vpn-update-self-dns-record
+
+	$vpn_crons
 	EOF
 }

@@ -1,4 +1,4 @@
-# VPS - A VPS for all external services, like TCP load-balancer, email gateway (rDNS)
+# VPS - A VPS for all external services, like TCP load-balancer, email gateway
 #
 # Environment variables
 #  - DOMAIN
@@ -6,39 +6,35 @@
 #  - TIMEZONE
 #
 # Output variables
-#  - vps_ip_address
+#  - home_server_wg_ip_address
 #
 # Required function
 #  - server_setup
 
-declare vps_ip_address
+declare home_server_wg_ip_address vps_ip_address
 
 # Software
 vps_install () {
-	apt-get install -y wireguard-tools ipcalc-ng
+	apt-get install -y wireguard-tools ipcalc-ng iptables
 
-	local vps_wg_ip_address home_server_wg_ip_address
+	local vps_wg_ip_address
 	vps_wg_ip_address=$(ipcalc-ng --minaddr --no-decorate $VPS_TUNNEL_SUBNET)
 	home_server_wg_ip_address=$(ipcalc-ng --maxaddr --no-decorate $VPS_TUNNEL_SUBNET)
 
 	# Generate WireGuard key pairs
 	local vps_privatekey vps_publickey home_server_privatekey home_server_publickey
-	local -a guest_privatekeys guest_publickeys
 	vps_privatekey=$(wg genkey)
 	vps_publickey=$(wg pubkey <<<$vps_privatekey)
 	home_server_privatekey=$(wg genkey)
 	home_server_publickey=$(wg pubkey <<<$home_server_privatekey)
-	for i in {1..4}
-	do
-		guest_privatekeys[$i]=$(wg genkey)
-		guest_publickeys[$i]=$(wg pubkey <<<${guest_privatekeys[$i]})
-	done
+
+
 
 	# Create the gateway instance
 	# The gateway will have a dnscrypt-proxy service for VPN client, but the server intentionally
 	#   not using it because do not want to mess with DHClient.
 	local vps_user_data_template vps_user_data
-	vps_user_data_template=$(cat $(dirname ${BASH_SOURCE[0]})/vps_user_data_base.sh $BASE/components/dnscrypt-proxy.sh | sed '/^\s*#/d')
+	vps_user_data_template=$(cat $(dirname ${BASH_SOURCE[0]})/vps_user_data_base.sh $BASE/components/dnscrypt-proxy.sh | sed -E '/^\s*#([^!]|$)/d')
 	vps_user_data=$(cat <<-ENDUSERDATA
 	#!/bin/bash
 
@@ -46,7 +42,7 @@ vps_install () {
 	home_server_wg_ip_address=$home_server_wg_ip_address
 	vps_privatekey=$vps_privatekey
 	home_server_publickey=$home_server_publickey
-	guest_publickeys=(${guest_publickeys[@]})
+	
 	TIMEZONE=$TIMEZONE
 
 	$vps_user_data_template
@@ -54,6 +50,22 @@ vps_install () {
 	dnscrypt_proxy_cron
 	ENDUSERDATA
 	)
+
+	# # Allow guest to connect to the VPS via VPN
+	# local -a guest_privatekeys guest_publickeys
+	# for i in {1..4}; do
+	# 	guest_privatekeys[$i]=$(wg genkey)
+	# 	guest_publickeys[$i]=$(wg pubkey <<<${guest_privatekeys[$i]})
+	# done
+
+	# vps_user_data=$(cat <<-ENDUSERDATA
+	# #!/bin/bash
+
+	# guest_publickeys=(${guest_publickeys[@]})
+	# $vps_user_data_template
+	# ENDUSERDATA
+	# )
+
 
 	vps_server_setup_and_pair
 
@@ -93,10 +105,26 @@ vps_install () {
 	[Service]
 	Type=oneshot
 	RemainAfterExit=yes
-	ExecStart=iptables -A INPUT -p tcp --dport 80 -j ACCEPT
-	ExecStart=iptables -A INPUT -p tcp --dport 443 -j ACCEPT
-	ExecStop=iptables -D INPUT -p tcp --dport 80 -j ACCEPT
-	ExecStop=iptables -D INPUT -p tcp --dport 443 -j ACCEPT
+	ExecStart=iptables -A INPUT -p tcp --dport 80  -i vps -j ACCEPT
+	ExecStart=iptables -A INPUT -p tcp --dport 443 -i vps -j ACCEPT
+	ExecStop=iptables  -D INPUT -p tcp --dport 80  -i vps -j ACCEPT
+	ExecStop=iptables  -D INPUT -p tcp --dport 443 -i vps -j ACCEPT
+
+	[Install]
+	WantedBy=multi-user.target
+	EOF
+
+	tee /etc/systemd/system/internet-mailserver.service <<-EOF >/dev/null
+	[Unit]
+	Description=Open the mail server to Internet
+	After=network-online.target
+	Wants=network-online.target
+
+	[Service]
+	Type=oneshot
+	RemainAfterExit=yes
+	ExecStart=iptables -A INPUT -p tcp --dport 25 -i vps -j ACCEPT
+	ExecStop=iptables  -D INPUT -p tcp --dport 25 -i vps -j ACCEPT
 
 	[Install]
 	WantedBy=multi-user.target
@@ -105,7 +133,8 @@ vps_install () {
 }
 
 vps_server_setup_and_pair () {
-	server_setup 'server-1' "$DOMAIN" "$vps_user_data" vps_ip_address
+	server_setup 'server-1' "public.$DOMAIN" "$vps_user_data" vps_ip_address
+	cloudflare_dns_update "$DOMAIN" 'A' 'public' "$vps_ip_address"
 
 	tee /etc/wireguard/vps.conf <<-EOF >/dev/null
 	[Interface]

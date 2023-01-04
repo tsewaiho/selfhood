@@ -11,7 +11,7 @@ reverse_proxy_install () {
 
 
 	# Get a wildcard cert for the domain
-	certbot_get_cert "$DOMAIN" "*.$DOMAIN" "$EMAIL"
+	certbot_get_cert "$DOMAIN" "*.$DOMAIN,$DOMAIN" "$EMAIL"
 
 	# Apache
 	# Common attributes for TLS

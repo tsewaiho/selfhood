@@ -15,13 +15,13 @@ apt-get install -y postgresql-13 redis-server
 #
 # If the /etc/postgresql/13/main exist before installing postgresql, need to enable it manually.
 # systemctl enable postgresql@13-main
+pg_dropcluster --stop 13 main
 
 
 # Redis
 # Using socket will have better performance
 # https://doc.owncloud.com/server/10.9/admin_manual/configuration/server/caching_configuration.html#redis-configuration-using-unix-sockets
+sed -i '/^port /c port 0' /etc/redis/redis.conf
 sed -i '/^bind 127\.0\.0\.1 ::1/c bind 127.0.0.1' /etc/redis/redis.conf
 sed -i '/unixsocket /s/^#\s*//' /etc/redis/redis.conf
-usermod -aG redis www-data
 systemctl restart redis-server.service
-systemctl restart php7.4-fpm.service

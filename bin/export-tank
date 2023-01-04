@@ -2,9 +2,12 @@
 
 # Stop necessary services, then export the tank for restore-from-disk.
 
-systemctl stop apache2.service
-systemctl stop php7.4-fpm.service
-systemctl stop postgresql@13-main.service
-systemctl stop syncthing@syncthing.service
-docker stop vaultwarden
+systemctl stop apache2
+systemctl stop php7.4-fpm
+systemctl stop postgresql@13-owncloud
+systemctl stop syncthing@syncthing
+systemctl stop code
+systemctl stop vaultwarden
+systemctl stop dovecot
+systemctl stop postfix
 zpool export tank

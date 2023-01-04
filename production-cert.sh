@@ -12,7 +12,7 @@ source $BASE/lib/helpers.sh
 
 runasroot
 
-certbot renew --cert-name $DOMAIN --server https://acme-v02.api.letsencrypt.org/directory --dry-run
+# certbot renew --server https://acme-v02.api.letsencrypt.org/directory --dry-run
 
 echo 'Do you want to replace your test cert with a production cert?'
 select choice in 'yes' 'no'; do
@@ -22,6 +22,10 @@ select choice in 'yes' 'no'; do
 			certbot renew --cert-name $DOMAIN --server https://acme-v02.api.letsencrypt.org/directory --force-renewal \
 			  --dns-cloudflare-propagation-seconds 60 -m "$EMAIL" --agree-tos --no-eff-email \
 			  --post-hook="systemctl restart apache2"
+			
+			certbot renew --cert-name public.$DOMAIN --server https://acme-v02.api.letsencrypt.org/directory --force-renewal \
+			  --dns-cloudflare-propagation-seconds 60 -m "$EMAIL" --agree-tos --no-eff-email \
+			  --post-hook="systemctl restart dovecot postfix"
 			
 			echo "Let's Encrypt test cert will be removed for ownCloud also."
 			# The existing permission of ca-bundle.crt is preserved.

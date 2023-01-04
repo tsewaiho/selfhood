@@ -38,7 +38,7 @@ deb $DEBIAN_MIRROR/debian bullseye-updates main
 deb $DEBIAN_MIRROR/debian bullseye-backports main contrib
 EOF
 apt-get update
-apt-get full-upgrade -y
+apt-get upgrade -y
 apt-get autoremove -y
 
 
@@ -70,6 +70,13 @@ mozilla/DigiCert_High_Assurance_EV_Root_CA.crt
 mozilla/DigiCert_Global_Root_G2.crt
 mozilla/DigiCert_Global_Root_CA.crt
 mozilla/Baltimore_CyberTrust_Root.crt
+
+# Sectigo - United States
+# apt.syncthing.net, dbeaver.io
+# https://support.sectigo.com/articles/Knowledge/Sectigo-AddTrust-External-CA-Root-Expiring-May-30-2020
+# https://sectigo.com/about/contact
+mozilla/USERTrust_ECC_Certification_Authority.crt
+mozilla/USERTrust_RSA_Certification_Authority.crt
 EOF
 update-ca-certificates --fresh
 
@@ -89,11 +96,35 @@ sed -i "/127\.0\.1\.1/d" /etc/hosts
 echo -e "127.0.1.1\t$HOSTNAME.$DOMAIN $HOSTNAME" >>/etc/hosts
 
 # Time zone
+# /etc/systemd/timesyncd.conf
+# On VirtualBox env, systemd-timesyncd is conflict with vboxadd-service, so ntp will not be started on boot.
+# https://stackoverflow.com/questions/67511592/debugging-systemctl-inactive-dead
 timedatectl set-timezone $TIMEZONE
 
 
 # SSH
 ssh-keygen -q -t ed25519 -N '' -f "$HOME/.ssh/id_ed25519"
+
+
+# ZRAM
+if [[ $ZRAM_SIZE != "0" ]]; then
+	echo 'zram' >/etc/modules-load.d/zram.conf
+	tee /etc/udev/rules.d/99-zram.rules <<-EOF
+	KERNEL=="zram0", SUBSYSTEM=="block", ACTION=="add", ATTR{comp_algorithm}="zstd", ATTR{disksize}="$ZRAM_SIZE", RUN="/usr/sbin/mkswap /dev/zram0"
+	EOF
+	tee -a /etc/sysctl.d/local.conf <<-EOF
+	vm.page-cluster = 0
+	vm.swappiness = 200
+	vm.vfs_cache_pressure = 500
+	vm.dirty_background_ratio = 2
+	EOF
+	sed -i -E '/^[^[:space:]#]+[[:space:]]+[^[:space:]]+[[:space:]]+swap/s/^/#/' /etc/fstab
+
+	tee -a /etc/fstab <<-EOF
+	/dev/zram0 none swap defaults 0 0
+	EOF
+fi
+
 
 
 # Kernel
@@ -110,3 +141,8 @@ elif [ -f "/boot/firmware/cmdline.txt" ]; then
 fi
 echo 'vm.overcommit_memory = 1' >>/etc/sysctl.d/local.conf
 sysctl --system
+
+# Raspberry Pi
+if [ -f "/boot/firmware/config.txt" ]; then
+	echo 'gpu_mem=16' >/boot/firmware/config.txt
+fi

@@ -15,3 +15,13 @@ minify () {
 	#       edit files in place (makes backup if SUFFIX supplied)
 	sed -ri "/^\s*($comment_symbol|$)/d" $filename
 }
+
+base64_hash () {
+	local password=$1 salt=${2:-$MASTER_PASSWORD}
+	echo -n "$password" | argon2 "$salt" -r | xxd -r -p | base64 -w 0
+}
+
+z85_hash () {
+	local password=$1 salt=${2:-$MASTER_PASSWORD}
+	echo -n "$password" | argon2 "$salt" -r | xxd -r -p | basenc --z85 -w 0
+}

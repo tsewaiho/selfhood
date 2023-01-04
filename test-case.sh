@@ -108,9 +108,9 @@ log_text=$(systemctl list-units --state=active | grep dnscrypt-proxy) &&
 [[ ! $log_text =~ ('dnscrypt-proxy.socket'|'dnscrypt-proxy-resolvconf') ]] &&
 pass || fail
 
-test_name="System DNS configuration is set to 127.0.0.1"
+test_name="System DNS configuration is set to 10.10.10.10"
 log_text=$(cat /etc/resolv.conf) &&
-[[ $log_text =~ ^'nameserver 127.0.0.1'$ ]] &&
+[[ $log_text =~ ^'nameserver 10.10.10.10'$ ]] &&
 pass || fail
 
 # Apache2
@@ -126,7 +126,7 @@ log_text=$(zpool status tank) &&
 pass || fail
 
 test_name="The required file system are created"
-log_text=$(zfs get mountpoint tank/owncloud_data tank/postgresql_data tank/letsencrypt tank/syncthing) &&
+log_text=$(zfs get mountpoint tank/owncloud_data tank/owncloud_database tank/letsencrypt tank/syncthing tank/mail) &&
 pass || fail
 
 # Backup suite - Rclone
@@ -141,7 +141,7 @@ pass || fail
 
 # ownCloud
 test_name="ownCloud is installed"
-log_text=$(sudo -u www-data php /var/www/owncloud/occ status) &&
+log_text=$(sudo -u owncloud php /var/www/owncloud/occ status) &&
 [[ $log_text =~ 'installed: true' ]] &&
 pass || fail
 

@@ -21,7 +21,7 @@ DOMAIN=$(hostname --domain)
 	my_ip=$(myip https://checkip.amazonaws.com/)
 } && {
 	[ "$dns_record" = "$my_ip" ] ||
-	cloudflare_dns_update $HOSTNAME $DOMAIN $my_ip
+	cloudflare_dns_update "$DOMAIN" 'A' "$HOSTNAME" "$my_ip"
 } || {
 	echo 'vpn-update-self-dns-record failed.' && exit 1
 }

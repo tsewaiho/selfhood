@@ -1,0 +1,30 @@
+#!/bin/bash
+
+set -eu -o pipefail
+
+interface=$1
+target_ip_address=$2
+user_subnet=$3
+lookup_table=$4
+priority=$5
+# interface='vps'
+# target_ip_address='1.1.1.1'
+# user_subnet='172.18.0.0/16'
+# lookup_table='150'
+# priority='25000'
+
+
+{
+	ping -q -I $interface -w 2 -c 1 $target_ip_address ||
+	ping -q -I $interface -w 2 -c 1 1.1.1.1
+} && {
+	ip rule | grep "from $user_subnet lookup $lookup_table" || {
+		echo 'Change:add' && 
+		ip rule add from $user_subnet lookup $lookup_table priority $priority
+	}
+} || {
+	ip rule | grep "from $user_subnet lookup $lookup_table" && {
+		echo 'Change:del' &&
+		ip rule del from $user_subnet lookup $lookup_table
+	}
+}

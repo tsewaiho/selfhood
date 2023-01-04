@@ -1,0 +1,8 @@
+#!/bin/bash
+
+set -eu -o pipefail
+
+target=$1
+
+cp /etc/wireguard/user_device.conf.$target /etc/wireguard/user_device.conf && 
+systemctl reload wg-quick@user_device
